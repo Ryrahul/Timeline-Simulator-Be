@@ -76,10 +76,6 @@ export class SimulationService {
           const summary = parsed.summary ?? parsed.Summary ?? '';
           const score = parsed.score ?? parsed.Score ?? 0;
 
-          console.log(`Agent: ${agentKey}`);
-          console.log('Summary:', summary);
-          console.log('Score:', score);
-
           const simulations = await this.prisma.simulation.create({
             data: {
               timelineId,

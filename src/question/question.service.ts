@@ -17,11 +17,17 @@ export class QuestionService {
       },
     });
 
-    const timelines = await this.timelineService.generateTimelines(
-      question.id,
-      question.text,
-    );
+    await this.timelineService.generateTimelines(question.id, question.text);
 
-    return timelines;
+    return this.prisma.question.findUnique({
+      where: { id: question.id },
+      include: {
+        Timelines: {
+          include: {
+            simulation: true,
+          },
+        },
+      },
+    });
   }
 }

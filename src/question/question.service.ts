@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { TimelineService } from 'src/timeline/timeline.service';
+import { ForkTimelineDto } from './dto/fork-timeline.dto';
 
 @Injectable()
 export class QuestionService {
@@ -25,6 +26,24 @@ export class QuestionService {
         Timelines: {
           include: {
             simulation: true,
+          },
+        },
+      },
+    });
+  }
+  async forkQuestion(dto: ForkTimelineDto) {
+    await this.timelineService.forkTimeline(dto.parentTimelineId, dto.newText);
+    const parentTimeline = await this.prisma.timeline.findUnique({
+      where: { id: dto.parentTimelineId },
+    });
+    console.log('hereeeeeeeeee');
+    return await this.prisma.question.findUnique({
+      where: { id: parentTimeline?.questionId },
+      include: {
+        Timelines: {
+          include: {
+            simulation: true,
+            forks: true,
           },
         },
       },

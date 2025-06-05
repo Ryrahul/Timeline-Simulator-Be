@@ -43,4 +43,43 @@ export class TimelineService {
       });
     }
   }
+  async forkTimeline(parentTimelineId: string, userInput: string) {
+    const parentTimeline = await this.prisma.timeline.findUnique({
+      where: { id: parentTimelineId },
+      include: { question: true },
+    });
+
+    if (!parentTimeline || !parentTimeline.question) {
+      throw new Error('Parent timeline or question not found');
+    }
+
+    for (const style of this.styles) {
+      const timeline = await this.prisma.timeline.create({
+        data: {
+          questionId: parentTimeline.question.id,
+          forkedFromId: parentTimeline.id,
+          summary: '',
+        },
+      });
+
+      await this.simulationService.generateSimulationsFromFork(
+        timeline.id,
+        parentTimeline.question.text,
+        parentTimeline.summary,
+        userInput,
+        this.styles[style],
+      );
+
+      const timelineSummary =
+        await this.simulationService.generateTimelineSummary(
+          timeline.id,
+          this.stylePrompts[style],
+        );
+
+      await this.prisma.timeline.update({
+        where: { id: timeline.id },
+        data: { summary: timelineSummary },
+      });
+    }
+  }
 }

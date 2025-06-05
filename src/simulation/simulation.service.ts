@@ -129,4 +129,85 @@ export class SimulationService {
 
     return completion?.choices[0]?.message?.content?.trim();
   }
+  async generateSimulationsFromFork(
+    timelineId: string,
+    previousQuestion: string,
+    previousSummary: string,
+    newForkedQuestion: string,
+    stylePrompt: string,
+  ) {
+    const agents = Object.entries(this.agentPrompts);
+
+    const results = await Promise.all(
+      agents.map(async ([agentKey, prompt]) => {
+        const messages: ChatCompletionMessageParam[] = [
+          {
+            role: 'system',
+            content: `${stylePrompt} ${prompt}`,
+          },
+          {
+            role: 'user',
+            content: `You are continuing from a previous life decision analysis.
+  
+  This is a fork of a previous decision timeline.
+  
+  Previous decision question: "${previousQuestion}"
+  Previous timeline summary: """${previousSummary}"""
+  
+  Now consider this new question or decision update:
+  "${newForkedQuestion}"
+  
+  Please analyze this new decision in the context of the previous timeline.
+  
+  Respond ONLY with a JSON object containing "summary" and "score".`,
+          },
+        ];
+
+        const completion = await this.openai.chat.completions.create({
+          model: 'gpt-4',
+          messages,
+          temperature: 0.7,
+        });
+
+        const rawResponse = completion.choices[0].message.content;
+        if (!rawResponse) {
+          console.error(
+            `No content returned from OpenAI for agent ${agentKey}`,
+          );
+          return null;
+        }
+
+        try {
+          const jsonStart = rawResponse.indexOf('{');
+          const jsonEnd = rawResponse.lastIndexOf('}');
+          if (jsonStart === -1 || jsonEnd === -1 || jsonEnd <= jsonStart) {
+            throw new Error('JSON not found or malformed in response');
+          }
+
+          const jsonString = rawResponse.substring(jsonStart, jsonEnd + 1);
+          const parsed = JSON.parse(jsonString);
+
+          const summary = parsed.summary ?? parsed.Summary ?? '';
+          const score = parsed.score ?? parsed.Score ?? 0;
+
+          const simulations = await this.prisma.simulation.create({
+            data: {
+              timelineId,
+              summary,
+              agentType: agentKey as AgentType,
+              score,
+            },
+          });
+
+          return simulations;
+        } catch (error) {
+          console.error(`Failed to parse JSON from agent ${agentKey}:`, error);
+          console.log('Raw response:', rawResponse);
+          return null;
+        }
+      }),
+    );
+
+    return results.filter((r) => r !== null);
+  }
 }

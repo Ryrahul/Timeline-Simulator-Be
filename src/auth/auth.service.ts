@@ -34,6 +34,7 @@ export class AuthService {
     };
     const token = await this.jwtService.signAsync(payload, {
       expiresIn: '15m',
+      // Todo : add secret from env
       secret: 'secret',
     });
     return {

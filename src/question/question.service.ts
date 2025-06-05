@@ -36,7 +36,7 @@ export class QuestionService {
     const parentTimeline = await this.prisma.timeline.findUnique({
       where: { id: dto.parentTimelineId },
     });
-    console.log('hereeeeeeeeee');
+    // Todo: Only return updated part here to ease and solve extra tree rendering in fe (do when i start fe)
     return await this.prisma.question.findUnique({
       where: { id: parentTimeline?.questionId },
       include: {

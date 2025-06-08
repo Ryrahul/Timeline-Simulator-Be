@@ -38,6 +38,7 @@ model Timeline {
   forkedFrom   Timeline?    @relation("TimelineFork", fields: [forkedFromId], references: [id])
   forkedFromId String?
   summary      String
+  tldr         String?
   forks        Timeline[]   @relation("TimelineFork")
   createdAt    DateTime     @default(now())
   simulation   Simulation[]

@@ -22,12 +22,7 @@ export class AuthService {
     const saltRounds = 10;
     return bcrypt.hash(password, saltRounds);
   }
-  private async SignToken(
-    id: string,
-    username: string,
-  ): Promise<{
-    accessToken: string;
-  }> {
+  private async SignToken(id: string, username: string): Promise<string> {
     const payload = {
       id,
       username,
@@ -37,9 +32,7 @@ export class AuthService {
       // Todo : add secret from env
       secret: 'secret',
     });
-    return {
-      accessToken: token,
-    };
+    return token;
   }
 
   async signUp(dto: SignUpDto) {
@@ -79,6 +72,11 @@ export class AuthService {
     if (!isPasswordValid) {
       throw new UnauthorizedException('Invalid credentials');
     }
-    return this.SignToken(user.id, user.username);
+    const token = await this.SignToken(user.id, user.username);
+    return {
+      accessToken: token,
+      username: user.username,
+      userEmail: user.email,
+    };
   }
 }

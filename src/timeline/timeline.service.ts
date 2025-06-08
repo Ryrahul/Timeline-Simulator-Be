@@ -21,28 +21,29 @@ export class TimelineService {
   async generateTimelines(questionId: string, text: string) {
     for (const style of this.styles) {
       const timeline = await this.prisma.timeline.create({
-        data: {
-          questionId,
-          summary: '',
-        },
+        data: { questionId, summary: '', tldr: '' },
       });
 
       await this.simulationService.generateSimulations(
         timeline.id,
         text,
         this.stylePrompts[style],
+        style,
       );
-      const timelineSummary =
+
+      const { summary, tldr } =
         await this.simulationService.generateTimelineSummary(
           timeline.id,
           this.stylePrompts[style],
         );
+
       await this.prisma.timeline.update({
         where: { id: timeline.id },
-        data: { summary: timelineSummary },
+        data: { summary, tldr },
       });
     }
   }
+
   async forkTimeline(parentTimelineId: string, userInput: string) {
     const parentTimeline = await this.prisma.timeline.findUnique({
       where: { id: parentTimelineId },
@@ -70,7 +71,7 @@ export class TimelineService {
         this.styles[style],
       );
 
-      const timelineSummary =
+      const { summary, tldr } =
         await this.simulationService.generateTimelineSummary(
           timeline.id,
           this.stylePrompts[style],
@@ -78,7 +79,7 @@ export class TimelineService {
 
       await this.prisma.timeline.update({
         where: { id: timeline.id },
-        data: { summary: timelineSummary },
+        data: { summary: summary, tldr },
       });
     }
   }

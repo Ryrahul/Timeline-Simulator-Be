@@ -3,121 +3,167 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import OpenAI from 'openai';
 import { ChatCompletionMessageParam } from 'openai/resources/index';
 import { AgentType } from '@prisma/client';
+interface AgentResponse {
+  summary: string;
+  score: number;
+}
+
+interface TimelineSummaryResponse {
+  summary: string;
+  tldr: string;
+}
 
 @Injectable()
 export class SimulationService {
-  private openai = new OpenAI();
+  private openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
   private agentPrompts = {
-    MENTAL_HEALTH:
-      'You are a mental health expert. Analyze the decision impact on emotional well-being. ' +
-      'Respond ONLY with a JSON object containing "summary" (a concise paragraph) and "score" (a number 0-10). ' +
-      'No additional text.',
-    FINANCE:
-      'You are a finance advisor. Analyze the financial implications of the decision. ' +
-      'Respond ONLY with a JSON object containing "summary" (a concise paragraph) and "score" (a number 0-10). ' +
-      'No additional text.',
-    PERSONAL_GROWTH:
-      'You are a personal growth coach. Analyze personal development aspects of the decision. ' +
-      'Respond ONLY with a JSON object containing "summary" (a concise paragraph) and "score" (a number 0-10). ' +
-      'No additional text.',
+    MENTAL_HEALTH: `You're a licensed mental health expert. Given a life decision, assess its 5-year impact on a person's mental wellbeing. 
+Respond ONLY with this JSON format:
+{
+  "summary": "Detailed explanation (150-250 words)",
+  "score": 1-10
+}`,
+    FINANCE: `You're a personal finance advisor. Evaluate a decision's 5-year impact on financial stability and growth.
+Respond ONLY with this JSON:
+{
+  "summary": "Detailed explanation (150-250 words)",
+  "score": 1-10
+}`,
+    PERSONAL_GROWTH: `You're a personal growth/life coach. Analyze how this decision affects personal development in 5 years.
+Respond ONLY with this JSON:
+{
+  "summary": "Detailed explanation (150-250 words)",
+  "score": 1-10
+}`,
   };
 
-  constructor(private readonly prisma: PrismaService) {
-    this.openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-    });
-  }
+  private styleUserContexts = {
+    Optimistic:
+      'You are chatting with a positive, hopeful user who wants uplifting advice.',
+    Cautious:
+      'You are chatting with a careful, detail-oriented user who prefers safe options.',
+    Innovative:
+      'You are chatting with a creative user who loves bold, original ideas.',
+  };
+
+  constructor(private prisma: PrismaService) {}
 
   async generateSimulations(
     timelineId: string,
     questionText: string,
     stylePrompt: string,
+    style: string,
   ) {
-    const agents = Object.entries(this.agentPrompts);
+    const combinedAgentPrompts = Object.entries(this.agentPrompts)
+      .map(([agent, prompt]) => `### Agent: ${agent}\n${prompt}`)
+      .join('\n\n');
 
-    const results = await Promise.all(
-      agents.map(async ([agentKey, prompt]) => {
-        const messages: ChatCompletionMessageParam[] = [
-          {
-            role: 'system',
-            content: `${stylePrompt} ${prompt}`,
+    const userContext = this.styleUserContexts[style] || '';
+
+    const messages: ChatCompletionMessageParam[] = [
+      { role: 'system', content: `${stylePrompt}\n\n${combinedAgentPrompts}` },
+      { role: 'user', content: userContext },
+      { role: 'user', content: `Decision: "${questionText}"` },
+      {
+        role: 'user',
+        content: `Please respond ONLY with a JSON object containing the keys MENTAL_HEALTH, FINANCE, PERSONAL_GROWTH, each having "summary" and "score" fields. Example:
+
+{
+  "MENTAL_HEALTH": { "summary": "...", "score": 7 },
+  "FINANCE": { "summary": "...", "score": 5 },
+  "PERSONAL_GROWTH": { "summary": "...", "score": 8 }
+}
+`,
+      },
+    ];
+
+    const completion = await this.openai.chat.completions.create({
+      model: 'gpt-3.5-turbo',
+      messages,
+      temperature: 0.7,
+    });
+
+    const raw = completion.choices[0].message?.content || '';
+    let parsed: Record<string, AgentResponse> = {};
+
+    try {
+      const jsonStart = raw.indexOf('{');
+      const jsonEnd = raw.lastIndexOf('}');
+      if (jsonStart === -1 || jsonEnd === -1 || jsonEnd <= jsonStart) {
+        throw new Error('JSON not found in OpenAI response');
+      }
+
+      const jsonString = raw.substring(jsonStart, jsonEnd + 1);
+      parsed = JSON.parse(jsonString) as Record<string, AgentResponse>;
+    } catch (err) {
+      console.error('Failed to parse JSON from OpenAI:', err);
+      parsed = {};
+    }
+    if (Object.keys(parsed).length === 0) {
+      console.warn(
+        'Parsed result empty. Creating fallback simulation entry with default data.',
+      );
+      return this.prisma.simulation
+        .create({
+          data: {
+            timelineId,
+            summary:
+              'Simulation generation failed or returned invalid data. Please try again.',
+            score: 0,
+            agentType: 'MENTAL_HEALTH',
           },
-          {
-            role: 'user',
-            content: `Decision context: "${questionText}"`,
-          },
-        ];
+        })
+        .then(() => []);
+    }
 
-        const completion = await this.openai.chat.completions.create({
-          model: 'gpt-4',
-          messages,
-          temperature: 0.7,
-        });
+    const promises = Object.entries(parsed).map(async ([agentKey, value]) => {
+      const summary = value?.summary || '';
+      const score = typeof value?.score === 'number' ? value.score : 5;
 
-        const rawResponse = completion.choices[0].message.content;
-        if (!rawResponse) {
-          console.error(
-            `No content returned from OpenAI for agent ${agentKey}`,
-          );
-          return null;
-        }
+      return this.prisma.simulation.create({
+        data: {
+          timelineId,
+          summary,
+          score,
+          agentType: agentKey as AgentType,
+        },
+      });
+    });
 
-        try {
-          const jsonStart = rawResponse.indexOf('{');
-          const jsonEnd = rawResponse.lastIndexOf('}');
-          if (jsonStart === -1 || jsonEnd === -1 || jsonEnd <= jsonStart) {
-            throw new Error('JSON not found or malformed in response');
-          }
-
-          const jsonString = rawResponse.substring(jsonStart, jsonEnd + 1);
-          const parsed = JSON.parse(jsonString);
-
-          const summary = parsed.summary ?? parsed.Summary ?? '';
-          const score = parsed.score ?? parsed.Score ?? 0;
-
-          const simulations = await this.prisma.simulation.create({
-            data: {
-              timelineId,
-              summary,
-              agentType: agentKey as AgentType,
-              score,
-            },
-          });
-
-          return simulations;
-        } catch (error) {
-          console.error(`Failed to parse JSON from agent ${agentKey}:`, error);
-          console.log('Raw response:', rawResponse);
-          return null;
-        }
-      }),
-    );
-
-    return results.filter((r) => r !== null);
+    return Promise.all(promises);
   }
-  async generateTimelineSummary(timelineId: string, stylePrompt: string) {
-    const simulations = await this.prisma.simulation.findMany({
+
+  async generateTimelineSummary(
+    timelineId: string,
+    stylePrompt: string,
+  ): Promise<TimelineSummaryResponse> {
+    const sims = await this.prisma.simulation.findMany({
       where: { timelineId },
     });
+
+    const agentInsights = sims
+      .map((sim) => {
+        return `[${sim.agentType}]: ${sim.summary} (Score: ${(sim?.score ?? 0).toFixed(1)})`;
+      })
+      .join('\n\n');
 
     const messages: ChatCompletionMessageParam[] = [
       {
         role: 'system',
-        content: `${stylePrompt}  
-        Using the following simulation summaries from different expert agents, create a clear and coherent timeline that outlines the progression and key impacts of the decision.  
-        Integrate insights from all perspectives (mental health, finance, personal growth) to produce a concise narrative showing how the decision unfolds over time and its overall effects.  
-        Respond with a well-structured summary suitable for a timeline format.
-        `,
+        content: `${stylePrompt}
+Given the three summaries below from agents (Mental Health, Finance, and Personal Growth), create a 5-year timeline showing yearly changes and impacts of the decision.
+Return ONLY in this JSON format:
+
+{
+  "summary": "Detailed year-by-year explanation (350–500 words)",
+  "tldr": "3–6 lines summarizing the key outcomes across years"
+}
+`,
       },
       {
         role: 'user',
-        content: simulations
-          .map(
-            (sim) =>
-              `[${sim.agentType}]: ${sim.summary} (Score: ${(sim.score ?? 0).toFixed(1)})`,
-          )
-          .join('\n'),
+        content: agentInsights,
       },
     ];
 
@@ -127,8 +173,32 @@ export class SimulationService {
       temperature: 0.7,
     });
 
-    return completion?.choices[0]?.message?.content?.trim();
+    const raw = completion.choices[0].message?.content || '';
+    let parsed: TimelineSummaryResponse = {
+      summary: raw,
+      tldr: 'TLDR generation failed.',
+    };
+
+    try {
+      const jsonStart = raw.indexOf('{');
+      const jsonEnd = raw.lastIndexOf('}');
+      if (jsonStart === -1 || jsonEnd === -1 || jsonEnd <= jsonStart) {
+        throw new Error('JSON not found or malformed in response');
+      }
+
+      const jsonString = raw.substring(jsonStart, jsonEnd + 1);
+      parsed = JSON.parse(jsonString) as TimelineSummaryResponse;
+    } catch (error) {
+      console.error('Failed to parse timeline summary JSON:', error);
+      console.log('Raw response:', raw);
+    }
+
+    return {
+      summary: parsed.summary || raw,
+      tldr: parsed.tldr || 'Summary generation failed.',
+    };
   }
+
   async generateSimulationsFromFork(
     timelineId: string,
     previousQuestion: string,
@@ -148,17 +218,17 @@ export class SimulationService {
           {
             role: 'user',
             content: `You are continuing from a previous life decision analysis.
-  
+
   This is a fork of a previous decision timeline.
-  
+
   Previous decision question: "${previousQuestion}"
   Previous timeline summary: """${previousSummary}"""
-  
+
   Now consider this new question or decision update:
   "${newForkedQuestion}"
-  
+
   Please analyze this new decision in the context of the previous timeline.
-  
+
   Respond ONLY with a JSON object containing "summary" and "score".`,
           },
         ];

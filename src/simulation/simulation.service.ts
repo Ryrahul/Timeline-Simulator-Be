@@ -152,14 +152,20 @@ Respond ONLY with this JSON:
       {
         role: 'system',
         content: `${stylePrompt}
-Given the three summaries below from agents (Mental Health, Finance, and Personal Growth), create a 5-year timeline showing yearly changes and impacts of the decision.
-Return ONLY in this JSON format:
-
-{
-  "summary": "Detailed year-by-year explanation (350–500 words)",
-  "tldr": "3–6 lines summarizing the key outcomes across years"
-}
-`,
+  
+  Given the three summaries below from agents (Mental Health, Finance, and Personal Growth), create a 5-year timeline showing yearly changes and impacts of the decision.
+  
+  Return your response in this exact XML format:
+  
+  <summary>
+  Detailed year-by-year explanation (350-500 words)
+  </summary>
+  
+  <tldr>
+  3-6 lines summarizing key outcomes across years
+  </tldr>
+  
+  Use natural formatting with line breaks. Do not include any other text.`,
       },
       {
         role: 'user',
@@ -167,36 +173,90 @@ Return ONLY in this JSON format:
       },
     ];
 
-    const completion = await this.openai.chat.completions.create({
-      model: 'gpt-4',
-      messages,
-      temperature: 0.7,
-    });
-
-    const raw = completion.choices[0].message?.content || '';
-    let parsed: TimelineSummaryResponse = {
-      summary: raw,
-      tldr: 'TLDR generation failed.',
-    };
-
     try {
-      const jsonStart = raw.indexOf('{');
-      const jsonEnd = raw.lastIndexOf('}');
-      if (jsonStart === -1 || jsonEnd === -1 || jsonEnd <= jsonStart) {
-        throw new Error('JSON not found or malformed in response');
+      const completion = await this.openai.chat.completions.create({
+        model: 'gpt-4',
+        messages,
+        temperature: 0.7,
+        max_tokens: 1000, 
+      });
+
+      const raw = completion.choices[0].message?.content?.trim() || '';
+
+      if (!raw) {
+        throw new Error('Empty response from OpenAI');
       }
 
-      const jsonString = raw.substring(jsonStart, jsonEnd + 1);
-      parsed = JSON.parse(jsonString) as TimelineSummaryResponse;
+      let parsed: TimelineSummaryResponse;
+
+      try {
+        parsed = this.parseXmlResponse(raw);
+      } catch (error) {
+        console.error('XML parsing failed, trying JSON fallback:', error);
+
+        try {
+          const jsonMatch = raw.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            parsed = JSON.parse(jsonMatch[0]);
+          } else {
+            throw new Error('No valid format found');
+          }
+        } catch (jsonError) {
+          console.error('All parsing failed, using text extraction');
+          parsed = this.extractContentFallback(raw);
+        }
+      }
+
+      if (!parsed.summary || !parsed.tldr) {
+        throw new Error('Parsed response missing required fields');
+      }
+
+      return {
+        summary: parsed.summary,
+        tldr: parsed.tldr,
+      };
     } catch (error) {
-      console.error('Failed to parse timeline summary JSON:', error);
-      console.log('Raw response:', raw);
+      console.error('Timeline summary generation failed:', error);
+
+      return {
+        summary:
+          'Timeline summary generation encountered an error. Please try again.',
+        tldr: 'Summary generation failed due to parsing issues.',
+      };
+    }
+  }
+
+  private parseXmlResponse(raw: string): TimelineSummaryResponse {
+    const summaryMatch = raw.match(/<summary>([\s\S]*?)<\/summary>/);
+    const tldrMatch = raw.match(/<tldr>([\s\S]*?)<\/tldr>/);
+
+    if (!summaryMatch || !tldrMatch) {
+      throw new Error('Required XML tags not found');
     }
 
     return {
-      summary: parsed.summary || raw,
-      tldr: parsed.tldr || 'Summary generation failed.',
+      summary: summaryMatch[1].trim(),
+      tldr: tldrMatch[1].trim(),
     };
+  }
+
+  private extractContentFallback(raw: string): TimelineSummaryResponse {
+    const summaryMatch =
+      raw.match(/"summary":\s*"([^"]*(?:\\.[^"]*)*)"/) ||
+      raw.match(/summary[^:]*:\s*([^,}]+)/i);
+    const tldrMatch =
+      raw.match(/"tldr":\s*"([^"]*(?:\\.[^"]*)*)"/) ||
+      raw.match(/tldr[^:]*:\s*([^,}]+)/i);
+
+    const summary = summaryMatch
+      ? summaryMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"')
+      : 'Timeline summary could not be extracted properly.';
+
+    const tldr = tldrMatch
+      ? tldrMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"')
+      : 'TLDR could not be extracted properly.';
+
+    return { summary, tldr };
   }
 
   async generateSimulationsFromFork(

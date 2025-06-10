@@ -68,7 +68,7 @@ export class TimelineService {
         parentTimeline.question.text,
         parentTimeline.summary,
         userInput,
-        this.styles[style],
+        this.stylePrompts[style],
       );
 
       const { summary, tldr } =

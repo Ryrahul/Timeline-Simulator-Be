@@ -1,6 +1,8 @@
-import { Body, Controller, Post, Req } from '@nestjs/common';
+import { Body, Controller, Post, Req, UsePipes } from '@nestjs/common';
 import { QuestionService } from './question.service';
-import { ForkTimelineDto } from './dto/fork-timeline.dto';
+import { ForkTimelineDto, forkTimelineSchema } from './dto/fork-timeline.dto';
+import { Public } from 'src/common/decorator/public-decorator';
+import { ZodValidationPipe } from 'src/common/zod.pipe';
 
 @Controller('question')
 export class QuestionController {
@@ -10,6 +12,7 @@ export class QuestionController {
     return this.questionService.askQuestion(text, req.user.userId);
   }
   @Post('fork')
+  @UsePipes(new ZodValidationPipe(forkTimelineSchema))
   async forkTimeline(@Body() dto: ForkTimelineDto) {
     return this.questionService.forkQuestion(dto);
   }

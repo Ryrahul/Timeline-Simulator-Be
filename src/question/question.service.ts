@@ -32,21 +32,46 @@ export class QuestionService {
     });
   }
   async forkQuestion(dto: ForkTimelineDto) {
+    console.log(dto.parentTimelineId);
+
     await this.timelineService.forkTimeline(dto.parentTimelineId, dto.newText);
+
     const parentTimeline = await this.prisma.timeline.findUnique({
       where: { id: dto.parentTimelineId },
     });
-    // Todo: Only return updated part here to ease and solve extra tree rendering in fe (do when i start fe)
-    return await this.prisma.question.findUnique({
+
+    const fullQuestion = await this.prisma.question.findUnique({
       where: { id: parentTimeline?.questionId },
       include: {
         Timelines: {
           include: {
             simulation: true,
-            forks: true,
+            forks: {
+              include: {
+                simulation: true,
+                forks: {
+                  include: {
+                    simulation: true,
+                    forks: true, // Continue nesting if needed
+                  },
+                },
+              },
+            },
           },
         },
       },
     });
+
+    if (!fullQuestion) {
+      throw new Error('Question not found');
+    }
+
+    // ✅ Filter only root-level timelines (forkedFromId === null)
+    const rootOnlyQuestion = {
+      ...fullQuestion,
+      Timelines: fullQuestion.Timelines.filter((t) => t.forkedFromId === null),
+    };
+
+    return rootOnlyQuestion;
   }
 }

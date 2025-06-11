@@ -312,6 +312,13 @@ Respond ONLY with this JSON:
           messages,
           temperature: 0.7,
         });
+        const { prompt_tokens, completion_tokens, total_tokens } =
+          completion.usage || {};
+
+        console.log('Token Usage 3:');
+        console.log(`- Prompt Tokens 3: ${prompt_tokens}`);
+        console.log(`- Completion Tokens 3: ${completion_tokens}`);
+        console.log(`- Total Tokens 3: ${total_tokens}`);
 
         const rawResponse = completion.choices[0].message.content;
         if (!rawResponse) {

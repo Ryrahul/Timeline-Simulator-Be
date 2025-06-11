@@ -42,6 +42,7 @@ model Timeline {
   forks        Timeline[]   @relation("TimelineFork")
   createdAt    DateTime     @default(now())
   simulation   Simulation[]
+  forkQuestion String?
 }
 
 enum AgentType {

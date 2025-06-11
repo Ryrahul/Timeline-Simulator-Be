@@ -79,7 +79,7 @@ export class TimelineService {
 
       await this.prisma.timeline.update({
         where: { id: timeline.id },
-        data: { summary: summary, tldr },
+        data: { summary: summary, tldr, forkQuestion: userInput },
       });
     }
   }

@@ -83,6 +83,12 @@ Respond ONLY with this JSON:
       messages,
       temperature: 0.7,
     });
+    const { prompt_tokens, completion_tokens, total_tokens } =
+      completion.usage || {};
+    console.log('Token Usage 3.5:');
+    console.log(`- Prompt Tokens 3.5: ${prompt_tokens}`);
+    console.log(`- Completion Tokens 3.5: ${completion_tokens}`);
+    console.log(`- Total Tokens 3.5: ${total_tokens}`);
 
     const raw = completion.choices[0].message?.content || '';
     let parsed: Record<string, AgentResponse> = {};
@@ -164,6 +170,7 @@ Respond ONLY with this JSON:
   <tldr>
   3-6 lines summarizing key outcomes across years
   </tldr>
+  Respond in well-formed XML. Do NOT include any commentary or explanations outside the tags.
   
   Use natural formatting with line breaks. Do not include any other text.`,
       },
@@ -175,11 +182,18 @@ Respond ONLY with this JSON:
 
     try {
       const completion = await this.openai.chat.completions.create({
-        model: 'gpt-4',
+        model: 'gpt-4o',
         messages,
         temperature: 0.7,
-        max_tokens: 1000, 
+        max_tokens: 1500,
       });
+      const { prompt_tokens, completion_tokens, total_tokens } =
+        completion.usage || {};
+
+      console.log('Token Usage 4:');
+      console.log(`- Prompt Tokens 4: ${prompt_tokens}`);
+      console.log(`- Completion Tokens 4: ${completion_tokens}`);
+      console.log(`- Total Tokens 4: ${total_tokens}`);
 
       const raw = completion.choices[0].message?.content?.trim() || '';
 
@@ -294,7 +308,7 @@ Respond ONLY with this JSON:
         ];
 
         const completion = await this.openai.chat.completions.create({
-          model: 'gpt-4',
+          model: 'gpt-3.5-turbo',
           messages,
           temperature: 0.7,
         });

@@ -2,6 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { TimelineService } from 'src/timeline/timeline.service';
 import { ForkTimelineDto } from './dto/fork-timeline.dto';
+import {
+  QuestionWithTimelines,
+  TimelineWithForksAndSimulations,
+} from 'src/common/types';
 
 @Injectable()
 export class QuestionService {
@@ -31,8 +35,7 @@ export class QuestionService {
       },
     });
   }
-  async forkQuestion(dto: ForkTimelineDto) {
-    console.log(dto.parentTimelineId);
+  async forkQuestion(dto: ForkTimelineDto): Promise<QuestionWithTimelines> {
 
     await this.timelineService.forkTimeline(dto.parentTimelineId, dto.newText);
 
@@ -40,38 +43,115 @@ export class QuestionService {
       where: { id: dto.parentTimelineId },
     });
 
-    const fullQuestion = await this.prisma.question.findUnique({
-      where: { id: parentTimeline?.questionId },
+    if (!parentTimeline) throw new Error('Parent timeline not found');
+
+    const question = await this.prisma.question.findUnique({
+      where: { id: parentTimeline.questionId },
+    });
+
+    if (!question) throw new Error('Question not found');
+
+    const rootTimelines = await this.prisma.timeline.findMany({
+      where: {
+        questionId: question.id,
+        forkedFromId: null,
+      },
       include: {
+        simulation: true,
+      },
+    });
+
+    const attachForks = async (
+      timeline: TimelineWithForksAndSimulations,
+    ): Promise<any> => {
+      const forks = await this.prisma.timeline.findMany({
+        where: { forkedFromId: timeline.id },
+        include: {
+          simulation: true,
+        },
+      });
+
+      if (forks.length > 0) {
+        timeline.forks = await Promise.all(forks.map(attachForks));
+      }
+
+      return timeline;
+    };
+
+    const fullTimelines = await Promise.all(rootTimelines.map(attachForks));
+
+    return {
+      ...question,
+      Timelines: fullTimelines,
+    };
+  }
+
+  async getQuestions(userId: string) {
+    const questions = await this.prisma.question.findMany({
+      where: {
+        userId,
+      },
+      select: {
+        id: true,
+        text: true,
+        createdAt: true,
         Timelines: {
-          include: {
+          select: {
+            summary: true,
+            tldr: true,
             simulation: true,
-            forks: {
-              include: {
-                simulation: true,
-                forks: {
-                  include: {
-                    simulation: true,
-                    forks: true, // Continue nesting if needed
-                  },
-                },
-              },
-            },
+            createdAt: true,
           },
         },
       },
     });
 
-    if (!fullQuestion) {
+    return questions;
+  }
+
+  async getQuestionById(id: string): Promise<QuestionWithTimelines> {
+    const question = await this.prisma.question.findUnique({
+      where: { id },
+    });
+
+    if (!question) {
       throw new Error('Question not found');
     }
 
-    // ✅ Filter only root-level timelines (forkedFromId === null)
-    const rootOnlyQuestion = {
-      ...fullQuestion,
-      Timelines: fullQuestion.Timelines.filter((t) => t.forkedFromId === null),
+    const rawTimelines = await this.prisma.timeline.findMany({
+      where: {
+        questionId: question.id,
+        forkedFromId: null,
+      },
+      include: {
+        simulation: true,
+      },
+    });
+
+    const attachForks = async (
+      timeline: TimelineWithForksAndSimulations,
+    ): Promise<TimelineWithForksAndSimulations> => {
+      const forks = await this.prisma.timeline.findMany({
+        where: { forkedFromId: timeline.id },
+        include: {
+          simulation: true,
+        },
+      });
+
+      if (forks.length > 0) {
+        timeline.forks = await Promise.all(forks.map((f) => attachForks(f)));
+      }
+
+      return timeline;
     };
 
-    return rootOnlyQuestion;
+    const fullTimelines = await Promise.all(
+      rawTimelines.map((t) => attachForks(t)),
+    );
+
+    return {
+      ...question,
+      Timelines: fullTimelines,
+    };
   }
 }

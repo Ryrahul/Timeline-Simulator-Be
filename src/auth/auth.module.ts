@@ -10,7 +10,7 @@ import { JwtStrategy } from './jwt.strategy';
     JwtModule.register({
       // Todo: use secret from env
       secret: 'secret',
-      signOptions: { expiresIn: '60m' },
+      signOptions: { expiresIn: '7d' },
     }),
   ],
   controllers: [AuthController],
